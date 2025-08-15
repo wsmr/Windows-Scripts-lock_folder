@@ -1,0 +1,227 @@
+@echo off
+setlocal ENABLEDELAYEDEXPANSION
+:: ===== CONFIG =====
+set "LOCKFOLDER=Private"
+set "ENCRYPTEDFILE=Private.locked"
+set "TEMPZIP=temp_archive.zip"
+:: ==================
+
+:: Check if PowerShell is available
+powershell -Command "exit 0" >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: PowerShell is required but not available.
+    pause
+    exit /b 1
+)
+
+:: Menu
+:MENU
+cls
+echo ============================
+echo    AES-256 Secure Folder
+echo ============================
+if exist "%LOCKFOLDER%" (
+    echo 1. Encrypt and lock folder
+) else if exist "%ENCRYPTEDFILE%" (
+    echo 1. Decrypt and unlock folder
+) else (
+    echo No folder or encrypted file found.
+    echo Create a folder named "%LOCKFOLDER%" to start.
+    echo.
+    echo 2. Exit
+    choice /C 2 /N /M "Choose: "
+    exit /b
+)
+echo 2. Exit
+echo.
+choice /C 12 /N /M "Choose: "
+if errorlevel 2 exit /b
+if errorlevel 1 (
+    if exist "%LOCKFOLDER%" (
+        call :EncryptFolder
+    ) else (
+        call :DecryptFolder
+    )
+)
+goto MENU
+
+:: ---- Encrypt folder ----
+:EncryptFolder
+echo.
+echo WARNING: This will permanently delete the original folder after encryption!
+echo Make sure you have backups of important data.
+echo.
+choice /C YN /M "Continue with encryption? (Y/N)"
+if errorlevel 2 goto :EOF
+
+:: Check if folder is empty
+dir /b "%LOCKFOLDER%" 2>nul | findstr "." >nul
+if errorlevel 1 (
+    echo ERROR: The "%LOCKFOLDER%" folder is empty!
+    pause
+    goto :EOF
+)
+
+echo.
+echo Creating compressed archive...
+:: Create ZIP archive using PowerShell
+powershell -NoProfile -Command ^
+    "try { " ^
+    "    Add-Type -AssemblyName System.IO.Compression.FileSystem; " ^
+    "    if (Test-Path '%TEMPZIP%') { Remove-Item '%TEMPZIP%' -Force }; " ^
+    "    [System.IO.Compression.ZipFile]::CreateFromDirectory('%LOCKFOLDER%', '%TEMPZIP%', 'Optimal', $true); " ^
+    "    Write-Host 'Archive created successfully.'; " ^
+    "} catch { " ^
+    "    Write-Host 'ERROR: Failed to create archive -' $_.Exception.Message; " ^
+    "    exit 1; " ^
+    "}"
+
+if errorlevel 1 (
+    echo Failed to create archive. Encryption aborted.
+    if exist "%TEMPZIP%" del "%TEMPZIP%"
+    pause
+    goto :EOF
+)
+
+:: Get password securely
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $p=Read-Host 'Enter encryption password' -AsSecureString; $B= [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); [Runtime.InteropServices.Marshal]::PtrToStringAuto($B) } catch { exit 1 }"`) do set "PW=%%P"
+
+if "!PW!"=="" (
+    echo ERROR: Password cannot be empty!
+    if exist "%TEMPZIP%" del "%TEMPZIP%"
+    pause
+    goto :EOF
+)
+
+echo Encrypting with AES-256...
+:: Encrypt the ZIP file
+powershell -NoProfile -Command ^
+    "try { " ^
+    "    $password = '%PW%'; " ^
+    "    $salt = [System.Text.Encoding]::UTF8.GetBytes('SecureFolder2024Salt'); " ^
+    "    $key = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($password, $salt, 10000); " ^
+    "    $aes = [System.Security.Cryptography.Aes]::Create(); " ^
+    "    $aes.Key = $key.GetBytes(32); " ^
+    "    $aes.IV = $key.GetBytes(16); " ^
+    "    $inputBytes = [System.IO.File]::ReadAllBytes('%TEMPZIP%'); " ^
+    "    $encryptor = $aes.CreateEncryptor(); " ^
+    "    $encryptedBytes = $encryptor.TransformFinalBlock($inputBytes, 0, $inputBytes.Length); " ^
+    "    [System.IO.File]::WriteAllBytes('%ENCRYPTEDFILE%', $encryptedBytes); " ^
+    "    $aes.Dispose(); " ^
+    "    $encryptor.Dispose(); " ^
+    "    Write-Host 'Encryption completed successfully.'; " ^
+    "} catch { " ^
+    "    Write-Host 'ERROR: Encryption failed -' $_.Exception.Message; " ^
+    "    exit 1; " ^
+    "}"
+
+if errorlevel 1 (
+    echo Encryption failed!
+    if exist "%TEMPZIP%" del "%TEMPZIP%"
+    pause
+    goto :EOF
+)
+
+:: Clean up
+if exist "%TEMPZIP%" del "%TEMPZIP%"
+
+:: Delete original folder
+echo Removing original folder...
+rd /s /q "%LOCKFOLDER%"
+
+echo.
+echo ===== ENCRYPTION COMPLETED =====
+echo Original folder: DELETED
+echo Encrypted file: %ENCRYPTEDFILE%
+echo.
+echo IMPORTANT: Keep your password safe! 
+echo Lost password = Lost data forever!
+echo.
+pause
+goto :EOF
+
+:: ---- Decrypt folder ----
+:DecryptFolder
+if not exist "%ENCRYPTEDFILE%" (
+    echo ERROR: No encrypted file (%ENCRYPTEDFILE%) found!
+    pause
+    goto :EOF
+)
+
+if exist "%LOCKFOLDER%" (
+    echo WARNING: Folder "%LOCKFOLDER%" already exists!
+    echo Decryption will overwrite existing contents.
+    echo.
+    choice /C YN /M "Continue with decryption? (Y/N)"
+    if errorlevel 2 goto :EOF
+    rd /s /q "%LOCKFOLDER%"
+)
+
+:: Get password securely
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try { $p=Read-Host 'Enter decryption password' -AsSecureString; $B= [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); [Runtime.InteropServices.Marshal]::PtrToStringAuto($B) } catch { exit 1 }"`) do set "PW=%%P"
+
+if "!PW!"=="" (
+    echo ERROR: Password cannot be empty!
+    pause
+    goto :EOF
+)
+
+echo Decrypting file...
+:: Decrypt the file
+powershell -NoProfile -Command ^
+    "try { " ^
+    "    $password = '%PW%'; " ^
+    "    $salt = [System.Text.Encoding]::UTF8.GetBytes('SecureFolder2024Salt'); " ^
+    "    $key = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($password, $salt, 10000); " ^
+    "    $aes = [System.Security.Cryptography.Aes]::Create(); " ^
+    "    $aes.Key = $key.GetBytes(32); " ^
+    "    $aes.IV = $key.GetBytes(16); " ^
+    "    $encryptedBytes = [System.IO.File]::ReadAllBytes('%ENCRYPTEDFILE%'); " ^
+    "    $decryptor = $aes.CreateDecryptor(); " ^
+    "    $decryptedBytes = $decryptor.TransformFinalBlock($encryptedBytes, 0, $encryptedBytes.Length); " ^
+    "    [System.IO.File]::WriteAllBytes('%TEMPZIP%', $decryptedBytes); " ^
+    "    $aes.Dispose(); " ^
+    "    $decryptor.Dispose(); " ^
+    "    Write-Host 'Decryption completed successfully.'; " ^
+    "} catch { " ^
+    "    Write-Host 'ERROR: Decryption failed. Wrong password or corrupted file.'; " ^
+    "    exit 1; " ^
+    "}"
+
+if errorlevel 1 (
+    echo Decryption failed! Wrong password or corrupted file.
+    if exist "%TEMPZIP%" del "%TEMPZIP%"
+    pause
+    goto :EOF
+)
+
+echo Extracting files...
+:: Extract the ZIP archive
+powershell -NoProfile -Command ^
+    "try { " ^
+    "    Add-Type -AssemblyName System.IO.Compression.FileSystem; " ^
+    "    [System.IO.Compression.ZipFile]::ExtractToDirectory('%TEMPZIP%', '.', $true); " ^
+    "    Write-Host 'Files extracted successfully.'; " ^
+    "} catch { " ^
+    "    Write-Host 'ERROR: Failed to extract archive -' $_.Exception.Message; " ^
+    "    exit 1; " ^
+    "}"
+
+if errorlevel 1 (
+    echo Failed to extract files!
+    if exist "%TEMPZIP%" del "%TEMPZIP%"
+    pause
+    goto :EOF
+)
+
+:: Clean up
+if exist "%TEMPZIP%" del "%TEMPZIP%"
+if exist "%ENCRYPTEDFILE%" del "%ENCRYPTEDFILE%"
+
+echo.
+echo ===== DECRYPTION COMPLETED =====
+echo Encrypted file: DELETED
+echo Restored folder: %LOCKFOLDER%
+echo.
+pause
+goto :EOF
