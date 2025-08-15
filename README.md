@@ -252,4 +252,22 @@ Two powerful Windows batch scripts for protecting your sensitive folders - choos
 
 ---
 
+## Alternative - Reliably across any systems: **`VeraCrypt`** Encrypted Container
+
+- Works on: Windows, macOS, Linux.
+- Advantages:
+  - Real encryption (AES, Twofish, etc.).
+  - One file acts as a “secure vault” — you mount it to see its contents.
+  - Password protected — can’t be opened without correct credentials.
+  - No plain text anywhere.
+- Setup Steps:
+    1. Install VeraCrypt on both Mac, Windows & Linux.
+    2. Create an encrypted container file (e.g., SecureVault.hc) on your pen drive.
+    3. Mount it in VeraCrypt → enter password → acts like a normal drive.
+    4. Dismount to lock.
+
+Why it’s good: You can move that Portable drive between your Mac and any Windows PC or Linux with VeraCrypt installed, and the vault remains secure.
+
+---
+
 **📁 Ready to protect your files? Download the appropriate script and follow the detailed README for your chosen security level!**
