@@ -1,0 +1,83 @@
+@echo off
+setlocal ENABLEDELAYEDEXPANSION
+
+:: ===== CONFIG =====
+set "LOCKFOLDER=Private"
+set "METAFILE=.lock.meta"
+set "CLSID={21EC2020-3AEA-1069-A2DD-08002B30309D}"
+:: ==================
+
+:: Check if password file exists
+if not exist "%METAFILE%" (
+    echo First-time setup: Creating secure folder and setting password...
+    md "%LOCKFOLDER%"
+    call :SetPassword
+    goto :EOF
+)
+
+:: Menu
+:MENU
+cls
+echo ============================
+echo    Secure Folder Utility
+echo ============================
+if exist "%LOCKFOLDER%" (
+    echo 1. Lock folder
+) else (
+    echo 1. Unlock folder
+)
+echo 2. Exit
+choice /C 12 /N /M "Choose: "
+if errorlevel 2 exit /b
+if errorlevel 1 (
+    if exist "%LOCKFOLDER%" (
+        call :Lock
+    ) else (
+        call :Unlock
+    )
+)
+goto MENU
+
+:: ---- Lock routine ----
+:Lock
+ren "%LOCKFOLDER%" "Control Panel.%CLSID%"
+attrib +h +s "Control Panel.%CLSID%"
+echo Folder locked.
+pause
+goto :EOF
+
+:: ---- Unlock routine ----
+:Unlock
+call :CheckPassword
+if "!PASSOK!"=="1" (
+    attrib -h -s "Control Panel.%CLSID%"
+    ren "Control Panel.%CLSID%" "%LOCKFOLDER%"
+    echo Folder unlocked.
+) else (
+    echo Wrong password.
+)
+pause
+goto :EOF
+
+:: ---- Set password (hash & salt) ----
+:SetPassword
+for /f %%A in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString()"') do set "SALT=%%A"
+set /p "dummy=Enter new password (will be hidden): "
+for /f %%B in ('powershell -NoProfile -Command "$p=Read-Host 'Enter new password' -AsSecureString; $B= [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); [Runtime.InteropServices.Marshal]::PtrToStringAuto($B)"') do set "PW=%%B"
+for /f %%C in ('powershell -NoProfile -Command "$s='%SALT%'; $p='%PW%'; $hash= [BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash([Text.Encoding]::UTF8.GetBytes($s+$p))) -replace '-', ''; Write-Output $hash"') do set "HASH=%%C"
+> "%METAFILE%" echo %SALT%:%HASH%
+attrib +h +s "%METAFILE%"
+echo Password set successfully.
+goto :EOF
+
+:: ---- Check password ----
+:CheckPassword
+set "PASSOK=0"
+for /f "tokens=1,2 delims=:" %%A in (%METAFILE%) do (
+    set "SALT=%%A"
+    set "HASH=%%B"
+)
+for /f %%P in ('powershell -NoProfile -Command "$p=Read-Host 'Enter password' -AsSecureString; $B= [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p); [Runtime.InteropServices.Marshal]::PtrToStringAuto($B)"') do set "PW=%%P"
+for /f %%H in ('powershell -NoProfile -Command "$s='%SALT%'; $p='%PW%'; $hash= [BitConverter]::ToString((New-Object Security.Cryptography.SHA256Managed).ComputeHash([Text.Encoding]::UTF8.GetBytes($s+$p))) -replace '-', ''; Write-Output $hash"') do set "TEST=%%H"
+if "!TEST!"=="%HASH%" set "PASSOK=1"
+goto :EOF
